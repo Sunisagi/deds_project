@@ -1,0 +1,33 @@
+# Copyright Broadcom, Inc. All Rights Reserved.
+# SPDX-License-Identifier: APACHE-2.0
+
+services:
+  spark-master:
+    image: bitnami/spark:3.5.1
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_URL=spark://spark-master:7077
+    ports:
+      - "8888:8080"
+      - "7077:7077"
+    expose:
+      - '7077'
+  spark-worker:
+    image: bitnami/spark:3.5.1
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=16G
+      - SPARK_WORKER_CORES=4
+    restart: always
+    ports:
+      - "8082:8081"
+
+networks:
+  default:
+    name: data_platform
+    external: true
+
+
+
+
