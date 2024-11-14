@@ -1,3 +1,9 @@
+### Setup Docker Network
+
+```sh
+docker network create -d bridge data_platform
+```
+
 ### Setup Airflow
 
 ```sh
@@ -37,3 +43,12 @@ To remove volume
 ```sh
 docker-compose down -v
 ```
+
+### Setup Spark connection in Airflow
+From Airflow web UI
+
+admin -> connections -> new connection ( + button)
+
+config connection as follow
+
+![alt text](image.png)
