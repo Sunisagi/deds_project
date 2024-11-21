@@ -2,20 +2,14 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.preprocessing import OneHotEncoder
-from collections import defaultdict, deque
 from typing import List, Dict, Set, Tuple
 from transformers import AutoTokenizer, AutoModel
-import torch
 from tqdm import tqdm
 import ast
 import re
 import nltk
-from fuzzywuzzy import fuzz
-from fuzzywuzzy import process
-from difflib import SequenceMatcher
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 import glob
 from pathlib import Path
 

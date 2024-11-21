@@ -4,23 +4,8 @@ import requests
 import xmltodict
 import json
 from pyarrow import fs
-import os
-import subprocess
+from helper.connection_setup import set_classpath
 
-def set_classpath() :
-    try:
-        hadoop_home = os.environ.get("HADOOP_HOME")
-        if not hadoop_home:
-            raise EnvironmentError("HADOOP_HOME environment variable is not set")
-
-        hdfs_classpath = subprocess.check_output([f"{hadoop_home}/bin/hdfs", "classpath", "--glob"]).decode().strip()
-        
-        # Set the CLASSPATH environment variable
-        os.environ["CLASSPATH"] = hdfs_classpath
-        print("Hadoop CLASSPATH set successfully.")
-    except Exception as e:
-        raise f"Error setting Hadoop CLASSPATH: {e}"
-    return
 @dag(
     schedule=None,
     start_date=datetime(2024, 11, 13),
@@ -41,7 +26,7 @@ def scraping_arxiv() :
             json_data = json.dumps(xmltodict.parse(response.content), indent=4) 
             return json_data
         else:
-            raise f"Error: Received status code {response.status_code} from arXiv API."      
+            raise ConnectionError(f"Error: Received status code {response.status_code} from arXiv API.")      
 
     @task()
     def write_json(json_data) :
@@ -53,7 +38,7 @@ def scraping_arxiv() :
 
         # hdfs = HDFileSystem("namenode", 8020) 
 
-        with hdfs.open_output_stream('json/arxiv.json') as file :
+        with hdfs.open_output_stream('/scraping/arxiv.json') as file :
             file.write(json_data.encode('utf-8'))
 
     json_data = query_arxiv()

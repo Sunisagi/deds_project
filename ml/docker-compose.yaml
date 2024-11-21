@@ -1,0 +1,13 @@
+services:
+    app:
+        build: ./
+        command: streamlit run /opt/src/visualization.py --server.port 8501
+        volumes:
+            - ./src:/opt/src
+        ports:
+            - 8501:8501
+
+networks:
+  default:
+    name: data_platform
+    external: true
