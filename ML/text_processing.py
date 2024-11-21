@@ -6,6 +6,10 @@ from datetime import datetime
 import glob
 from pathlib import Path
 
+from pyarrow import fs
+import os
+import subprocess
+
 def find_value_by_key(data, target_key):
     """Recursively find the first value associated with a given key in the JSON object."""
     if isinstance(data, dict):
@@ -50,7 +54,39 @@ def get_class(data):
             else:
                 target = [cls['classification']]
     return target
+def set_classpath() :
+    try:
+        hadoop_home = os.environ.get("HADOOP_HOME")
+        if not hadoop_home:
+            raise EnvironmentError("HADOOP_HOME environment variable is not set")
 
+        hdfs_classpath = subprocess.check_output([f"{hadoop_home}/bin/hdfs", "classpath", "--glob"]).decode().strip()
+        
+        # Set the CLASSPATH environment variable
+        os.environ["CLASSPATH"] = hdfs_classpath
+        print("Hadoop CLASSPATH set successfully.")
+    except Exception as e:
+        raise f"Error setting Hadoop CLASSPATH: {e}"
+    return
+
+def write_json_hadoop(json_data,file_name) :
+        
+        # Get the Hadoop classpath using `hdfs classpath --glob`
+        
+        set_classpath()
+        hdfs = fs.HadoopFileSystem("namenode", 8020)
+
+        # hdfs = HDFileSystem("namenode", 8020) 
+
+        with hdfs.open_output_stream(f'json/{file_name}.json') as file :
+            file.write(json_data.encode('utf-8'))
+
+def read_json_hadoop(file_name):
+    set_classpath()
+    hdfs = fs.HadoopFileSystem("namenode", 8020)
+
+    with hdfs.open_input_file(file_name) as f:
+        print(f.readall())
 
 def initialize():
     data_rows = []
