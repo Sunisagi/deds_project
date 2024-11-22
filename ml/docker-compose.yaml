@@ -1,11 +1,16 @@
 services:
-    app:
+    streamlit-app:
         build: ./
         command: streamlit run /opt/src/visualization.py --server.port 8501
         volumes:
             - ./src:/opt/src
         ports:
             - 8501:8501
+    flask-app:
+        build: ./
+        command: python3 /opt/src/retrain_app.py
+        volumes:
+            - ./src:/opt/src
 
 networks:
   default:
