@@ -13,73 +13,89 @@ import os
 from tqdm import tqdm
 import pickle
 from pathlib import Path
+from connection_setup import set_classpath
+from pyarrow import fs
 
 nltk.download("stopwords")
 from nltk.corpus import stopwords
 
-# Function to get the latest file based on date in the filename
-def load_latest_file(prefix, extension="json"):
-    # Get a list of files matching the pattern (e.g., "paper_*.json")
-    files = glob.glob(f"{prefix}_*.{extension}")
-    
-    # If no files match, return None or handle as needed
-    if not files:
-        print("No files found.")
-        return None
-    
-    # Sort files by date extracted from filename (assuming date is in format YYYY_MM_DD)
-    files.sort(key=lambda x: datetime.strptime("_".join(x.split("_")[-3:]).split(f".{extension}")[0], "%Y_%m_%d"))
-    
-    # Get the latest file (last in sorted list)
-    latest_file = files[-1]
-    print(f"Loading latest file: {latest_file}")
-    
-    # Load the file based on its extension
-    if extension == "json":
-        return pd.read_json(latest_file, orient="records", lines=True)
-    elif extension == "csv":
-        return pd.read_csv(latest_file)
-    else:
-        print("Unsupported file extension.")
+# Read a JSON file from Hadoop
+def read_json_hadoop(file_name, return_json=False):
+    set_classpath()
+    hdfs = fs.HadoopFileSystem("namenode", 8020)  # Replace with actual Hadoop configuration
+    with hdfs.open_input_stream(file_name) as f:
+        content = f.read().decode("utf-8")
+        if return_json:
+            return json.loads(content)
+        else:
+            return pd.read_json(content, orient='records')
+
+# List all files in a folder on Hadoop
+def ls_hadoop(folder):
+    set_classpath()
+    hdfs = fs.HadoopFileSystem("namenode", 8020)
+    file_names = hdfs.get_file_info(fs.FileSelector(folder, recursive=True))
+    return file_names
+
+# Find the latest file based on the prefix and date in the filename
+def find_latest_file_for_prefix(prefix, file_names):
+    # Filter files with the given prefix
+    filtered_files = [f for f in file_names if f.startswith(prefix)]
+    if not filtered_files:
+        print("No files found for the given prefix.")
         return None
 
-# Function to get the latest file based on date in the filename
-def load_latest_json(prefix):
-    # Get a list of files matching the pattern (e.g., "paper_*.json")
-    files = glob.glob(f"{prefix}_*.json")
-    
-    # If no files match, return None or handle as needed
-    if not files:
-        print("No files found.")
-        return None
-    
-    # Sort files by date extracted from filename (assuming date is in format YYYY_MM_DD)
-    files.sort(key=lambda x: datetime.strptime("_".join(x.split("_")[-3:]).split(f".json")[0], "%Y_%m_%d"))
-    
-    # Get the latest file (last in sorted list)
-    latest_file = files[-1]
-    print(f"Loading latest file: {latest_file}")
+    # Sort files by date extracted from the filename
+    filtered_files.sort(
+        key=lambda x: datetime.strptime("_".join(x.split("_")[-3:]).split(".")[0], "%Y_%m_%d")
+    )
 
-    with open(latest_file, "r") as f:
-        return json.load(f)
-    
-def load_latest_pkl(prefix):
-    files = glob.glob(f"{prefix}_*.pkl")
-    if not files:
-        print("No files found.")
+    # Return the latest file
+    return filtered_files[-1] if filtered_files else None
+
+# Function to load the latest file based on prefix and folder
+def load_latest_file(prefix, folder):
+    file_names = [f.base_name for f in ls_hadoop(folder)]
+    file_name = find_latest_file_for_prefix(prefix, file_names)
+    if file_name is None:
         return None
-    
-    # Sort files by date extracted from filename (assuming date is in format YYYY_MM_DD)
-    files.sort(key=lambda x: datetime.strptime("_".join(x.split("_")[-3:]).split(".pkl")[0], "%Y_%m_%d"))
-    
-    # Get the latest file (last in sorted list)
-    latest_file = files[-1]
-    print(f"Loading latest file: {latest_file}")
-    
-    # Load the pickle content from the file
-    with open(latest_file, "rb") as f:
+
+    print(f"Load File: {folder}/{file_name}")
+    return read_json_hadoop(f"{folder}/{file_name}")
+
+# Additional functions for specific file types
+def load_latest_json(prefix, folder):
+    file_names = [f.base_name for f in ls_hadoop(folder)]
+    file_name = find_latest_file_for_prefix(prefix, file_names)
+    if file_name is None:
+        return None
+
+    print(f"Load File: {folder}/{file_name}")
+    return read_json_hadoop(f"{folder}/{file_name}", return_json=True)
+
+def load_latest_pkl(prefix, folder):
+    file_names = [f.base_name for f in ls_hadoop(folder)]
+    file_name = find_latest_file_for_prefix(prefix, file_names)
+    if file_name is None:
+        return None
+
+    print(f"Load File: {folder}/{file_name}")
+    set_classpath()
+    hdfs = fs.HadoopFileSystem("namenode", 8020)
+    with hdfs.open_input_stream(f"{folder}/{file_name}") as f:
         return pickle.load(f)
 
+def write_json_hadoop(json_data,file_name) :
+    set_classpath()
+    hdfs = fs.HadoopFileSystem("namenode", 8020)
+    with hdfs.open_output_stream(f'{file_name}.json') as file :
+        file.write(json_data.encode('utf-8'))
+
+def write_pickle_hadoop(data, file_name):
+    set_classpath()
+    hdfs = fs.HadoopFileSystem("namenode", 8020)  # Adjust with your Hadoop configuration
+    with hdfs.open_output_stream(f"{file_name}.pkl") as file:
+        pickle.dump(data, file)
 
 
     
@@ -111,13 +127,9 @@ def create_text_similarity_json(paper_df, model, tokenizer,save_dir):
         # Store embeddings in the dictionaries
         title_embeddings_json[paper_id] = title_embedding
         abstract_embeddings_json[paper_id] = abstract_embedding
-    
-    # Save title and abstract embeddings to JSON files
-    with open(f"{save_dir}/title_embeddings_{date_str}.json", "w") as title_file:
-        json.dump(title_embeddings_json, title_file)
-    
-    with open(f"{save_dir}/abstract_embeddings_{date_str}.json", "w") as abstract_file:
-        json.dump(abstract_embeddings_json, abstract_file)
+
+        write_pickle_hadoop(title_embeddings_json, f"{save_dir}/title_embeddings_{date_str}.json")
+        write_pickle_hadoop(abstract_embeddings_json, f"{save_dir}/abstract_embeddings_{date_str}.json")
 
     print("Title and abstract embeddings saved to title_embeddings.json and abstract_embeddings.json.")
 
@@ -431,14 +443,8 @@ class TextRecommender:
         return float(self.similarity_matrix[idx1, idx2])
 
 def make_model(SET_RETRAIN  = False):
-    current_path = Path.cwd()  # or os.getcwd()
-    PROJECT_ROOT = current_path.parent 
-
-    embedding_dir = f"{PROJECT_ROOT}/model/embedding"
-    os.makedirs(embedding_dir, exist_ok=True) 
-
-    recommender_dir = f"{PROJECT_ROOT}/model/recommender"
-    os.makedirs(recommender_dir, exist_ok=True) 
+    embedding_dir ="/model/embedding"
+    recommender_dir ="/model/recommender"
 
     date_str = datetime.now().strftime("%Y_%m_%d")
 
@@ -446,8 +452,8 @@ def make_model(SET_RETRAIN  = False):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
 
-    papers_df = load_latest_file(f"{PROJECT_ROOT}/data/process/clean_paper","json")
-    affiliations_df = load_latest_file(f"{PROJECT_ROOT}/data/process/affiliation","json")
+    papers_df = load_latest_file(f"clean_paper","/process")
+    affiliations_df = load_latest_file(f"affiliation","/process")
 
     # Convert specific columns to strings
     if papers_df is not None:
@@ -462,8 +468,8 @@ def make_model(SET_RETRAIN  = False):
         create_text_similarity_json(papers_df, model, tokenizer,embedding_dir)
 
     # Load title and abstract embeddings from JSON
-    title_embeddings = load_latest_json(f"{embedding_dir}/title_embeddings")
-    abstract_embeddings = load_latest_json(f"{embedding_dir}/abstract_embeddings")
+    title_embeddings = load_latest_json("title_embeddings",embedding_dir)
+    abstract_embeddings = load_latest_json("abstract_embeddings",embedding_dir)
 
     # # Convert embeddings from dictionary to tensor for further computation, if needed
     # title_similarity_matrix = torch.tensor([title_embeddings[paper_id] for paper_id in papers_df['id']])
@@ -477,16 +483,11 @@ def make_model(SET_RETRAIN  = False):
     return recommender 
 
 def save_model(recommender):
-    current_path = Path.cwd()  # or os.getcwd()
-    PROJECT_ROOT = current_path.parent 
     date_str = datetime.now().strftime("%Y_%m_%d")
-    recommender_dir = f"{PROJECT_ROOT}/model/recommender"
-    with open(f"{recommender_dir}/model_{date_str}.pkl", "wb") as file:
-        pickle.dump(recommender, file)
+    recommender_dir = f"/model/recommender"
+    write_pickle_hadoop(recommender, f"{recommender_dir}/model_{date_str}")
 
 
 def load_model():
-    current_path = Path.cwd()  # or os.getcwd()
-    PROJECT_ROOT = current_path.parent 
-    recommender_dir = f"{PROJECT_ROOT}/model/recommender"
-    return load_latest_pkl(f"{recommender_dir}/model")
+    recommender_dir = "/model/recommender"
+    return load_latest_pkl("model",recommender_dir)

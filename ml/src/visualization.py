@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import glob
 from component import *
 from datetime import datetime, timezone
 from functools import partial
@@ -11,55 +10,21 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
 from sklearn.metrics.pairwise import cosine_similarity
-from pathlib import Path
 import pickle
+from recommendation import load_latest_file,load_latest_pkl
 # Main content
 st.title('Project')
 
-def load_latest_pkl(prefix):
-    files = glob.glob(f"{prefix}_*.pkl")
-    if not files:
-        print("No files found.")
-        return None
-    
-    # Sort files by date extracted from filename (assuming date is in format YYYY_MM_DD)
-    files.sort(key=lambda x: datetime.strptime("_".join(x.split("_")[-3:]).split(".pkl")[0], "%Y_%m_%d"))
-    
-    # Get the latest file (last in sorted list)
-    latest_file = files[-1]
-    print(f"Loading latest file: {latest_file}")
-    
-    # Load the pickle content from the file
-    with open(latest_file, "rb") as f:
-        return pickle.load(f)
 # Cache functions
 @st.cache_resource  # 👈 Add the caching decorator
 def load_model_recomendation():
-    current_path = Path.cwd()  # or os.getcwd()
-    PROJECT_ROOT = current_path 
     recommender_dir = f"{PROJECT_ROOT}/model/recommender"
-    return load_latest_pkl(f"{recommender_dir}/model")
+    return load_latest_pkl("model",recommender_dir)
 
 @st.cache_data  # 👈 Add the caching decorator
-def load_latest_file(prefix, extension="json"):
-    files = glob.glob(f"{prefix}_*.{extension}")
-    
-    if not files:
-        print("No files found.")
-        return None
-    
-    files.sort(key=lambda x: datetime.strptime("_".join(x.split("_")[-3:]).split(f".{extension}")[0], "%Y_%m_%d"))
-    
-    latest_file = files[-1]
-    print(f"Loading latest file: {latest_file}")
-    
-    if extension == "json":
-        return pd.read_json(latest_file, orient="records", lines=True)
-    elif extension == "csv":
-        return pd.read_csv(latest_file)
-    else:
-        print("Unsupported file extension.")
-        return None
+def load_file(prefix):
+    data_dir = '/process'
+    return load_latest_file(data_dir)
 
 
 # Session state initialization for mode and paper_id
@@ -70,11 +35,9 @@ if 'paper_id' not in st.session_state:
 if 'author_id' not in st.session_state:
     st.session_state.author_id = None
 model = load_model_recomendation()
-current_path = Path.cwd()  # or os.getcwd()
-PROJECT_ROOT = current_path 
-papers_df = load_latest_file(f"{PROJECT_ROOT}/data/process/paper", "json")
-authors_df = load_latest_file(f"{PROJECT_ROOT}/data/process/author", "json")
-affiliations_df = load_latest_file(f"{PROJECT_ROOT}/data/process/affiliation", "json")
+papers_df = load_file("paper")
+authors_df = load_file("author")
+affiliations_df = load_file("affiliation")
 
 papers_df['id'] = papers_df['id'].astype(str)
 affiliations_df['affid'] = affiliations_df['affid'].astype(str)
