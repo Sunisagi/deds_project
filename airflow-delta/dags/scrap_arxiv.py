@@ -1,4 +1,5 @@
 from datetime import datetime
+import time
 from airflow.decorators import dag, task
 import requests
 import xmltodict
@@ -33,15 +34,25 @@ def scraping_arxiv() :
         year = vars['year']
         start = vars['start']
         max_results = vars['max_results'] 
+        max_retries = 5
 
         query = f'submittedDate:[{year}01010000 TO {year}12312359]'
         url = f'http://export.arxiv.org/api/query?search_query={query}&start={start}&max_results={max_results}'
-        response = requests.get(url)
-        if response.status_code == 200:
-            json_data = json.dumps(xmltodict.parse(response.content), indent=4)            
-            return json_data
-        else:
-            raise ConnectionError(f"Error: Received status code {response.status_code} from arXiv API.")      
+        for i in range(1, max_retries+1) :
+            print(f'retry number: {i}')
+            response = requests.get(url)
+            if response.status_code == 200:
+                dict_data = xmltodict.parse(response.content)
+                if 'entry' in dict_data['feed'] :
+                    json_data = json.dumps(dict_data, indent=4)  
+                    print('scraping success')          
+                    return json_data
+                else :
+                    time.sleep(20)
+                    print('No data return')
+            else:
+                raise ConnectionError(f"Error: Received status code {response.status_code} from arXiv API.")   
+        raise TimeoutError(f"No data return after: {max_retries}")   
 
     @task()
     def write_json(json_data) :
