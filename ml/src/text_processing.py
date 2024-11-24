@@ -8,7 +8,8 @@ from pathlib import Path
 from connection_setup import set_classpath
 from pyarrow import fs
 import os
-import subprocess
+import io
+import numpy as np
 
 def find_value_by_key(data, target_key):
     """Recursively find the first value associated with a given key in the JSON object."""
@@ -60,6 +61,17 @@ def write_json_hadoop(json_data,file_name) :
     hdfs = fs.HadoopFileSystem("namenode", 8020)
     with hdfs.open_output_stream(f'{file_name}.json') as file :
         file.write(json_data.encode('utf-8'))
+
+def write_numpy_hadoop(data, file_name):
+    set_classpath()
+    hdfs = fs.HadoopFileSystem("namenode", 8020)
+
+    # Serialize the NumPy data into a bytes stream
+    with io.BytesIO() as buffer:
+        np.save(buffer, data)
+        buffer.seek(0)  # Reset buffer position to the beginning
+        with hdfs.open_output_stream(f'{file_name}.npy') as file:
+            file.write(buffer.read())
 
 def read_json_hadoop(file_name):
     set_classpath()
@@ -307,8 +319,8 @@ def initialize():
     path = f"{save_dir}/paper_{date_str}"
     write_json_hadoop(papers_df.to_json(orient="records", lines=True),path)
 
-    path = f"{save_dir}/cite_{date_str}"
-    write_json_hadoop(citations_df.to_json(orient="records", lines=True),path)
+    # path = f"{save_dir}/cite_{date_str}"
+    # write_json_hadoop(citations_df.to_json(orient="records", lines=True),path)
 
     path = f"{save_dir}/author_{date_str}"
     write_json_hadoop(author_df.to_json(orient="records", lines=True),path)

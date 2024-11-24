@@ -17,19 +17,18 @@ import io
 import gc
 from torch.utils.data import DataLoader, Dataset
 
-nltk.download("stopwords")
-from nltk.corpus import stopwords
 
 # Read a JSON file from Hadoop
-def read_json_hadoop(file_name, return_json=False):
+def read_json_hadoop(file_name,return_json = False):
     set_classpath()
-    hdfs = fs.HadoopFileSystem("namenode", 8020)  # Replace with actual Hadoop configuration
+    hdfs = fs.HadoopFileSystem("namenode", 8020)
     with hdfs.open_input_stream(file_name) as f:
-        content = f.read().decode("utf-8")
+        content = f.read().decode("utf-8")  
+        content_io = io.StringIO(content)
         if return_json:
-            return json.loads(content)
+            return json.load(content_io) 
         else:
-            return pd.read_json(content, orient='records', lines=True)
+            return pd.read_json(content_io, orient='records', lines=True)  
 
 def read_numpy_hadoop(file_name):
     set_classpath()
@@ -173,6 +172,12 @@ def create_text_similarity_json(paper_df, model, tokenizer, save_dir):
     write_numpy_hadoop(title_embeddings_array, f"{save_dir}/title_embeddings_{date_str}")
     write_numpy_hadoop(abstract_embeddings_array, f"{save_dir}/abstract_embeddings_{date_str}")
     write_numpy_hadoop(np.array(index_to_id), f"{save_dir}/index_to_id_{date_str}")
+
+    del title_embeddings_array
+    del abstract_embeddings_array
+    del index_to_id
+    # Run garbage collector
+    gc.collect()
     print("Embeddings and index-to-id mapping saved successfully.")
 
 class TextRecommender:
@@ -183,6 +188,7 @@ class TextRecommender:
         self.paper_df = paper_df
         self.affiliations_df = affiliations_df
         self.top_n = top_n
+        self.stop_words = read_numpy_hadoop("/temp/stopwords_english.npy")
 
         paper_indices = []
         for idx, paper in paper_df.iterrows():
@@ -211,7 +217,7 @@ class TextRecommender:
         s = re.sub(r"n\'t", " not", s)
         s = re.sub(r"\b(1[0-9]{3}|2[0-9]{3})\b", "", s)
         s = re.sub(r'([©\'\"\(\)\!\\])', r' ', s)
-        s = " ".join([word for word in s.split(' ') if word not in stopwords.words('english')])
+        s = " ".join([word for word in s.split(' ') if word not in self.stop_words])
         s = self.pattern_name.sub("", s)
         s = re.sub(r'\s+', ' ', s).strip()
         return s

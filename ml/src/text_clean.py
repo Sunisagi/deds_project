@@ -7,15 +7,29 @@ from transformers import AutoTokenizer, AutoModel
 from tqdm import tqdm
 import ast
 import re
-import nltk
 import json
 from datetime import datetime
-import glob
+import io
 from pathlib import Path
 from connection_setup import set_classpath
 from pyarrow import fs
 from text_processing import find_value_by_key
 
+
+
+def read_numpy_hadoop(file_name):
+    set_classpath()
+    hdfs = fs.HadoopFileSystem("namenode", 8020)
+
+    # Read the file from HDFS into memory
+    with hdfs.open_input_stream(file_name) as file:
+        data = file.read()
+
+    # Deserialize the data into a NumPy array
+    with io.BytesIO(data) as buffer:
+        array = np.load(buffer)
+
+    return array
 def write_json_hadoop(json_data,file_name) :
     set_classpath()
     hdfs = fs.HadoopFileSystem("namenode", 8020)
@@ -27,10 +41,11 @@ def read_json_hadoop(file_name,return_json = False):
     hdfs = fs.HadoopFileSystem("namenode", 8020)
     with hdfs.open_input_stream(file_name) as f:
         content = f.read().decode("utf-8")  
+        content_io = io.StringIO(content)
         if return_json:
-            return json.loads(content) 
+            return json.load(content_io) 
         else:
-            return pd.read_json(content, orient='records', lines=True) 
+            return pd.read_json(content_io, orient='records', lines=True)  
 def ls_hadoop(folder):
     set_classpath()
     hdfs = fs.HadoopFileSystem("namenode", 8020)
@@ -81,7 +96,7 @@ def extract_feature(papers_df,authors_df,affiliations_df):
                     aus = data["author"]
                 for name in aus:
                     # Handle "name" and "surname" or "indexed-name"
-                    if "." in name["name"].split()[-1]:  # Handle the case where initials are in "name"
+                    if "." in name["name"].split()[-1] and len(name["name"].split()) >1:  # Handle the case where initials are in "name"
                         indexed_name = name["name"]
                         surname = indexed_name.split()[0]
                         initials = indexed_name.split()[1]
@@ -166,12 +181,10 @@ def extract_feature(papers_df,authors_df,affiliations_df):
 
 
 def clean_text(papers_df):
-    nltk.download("stopwords")
-    from nltk.corpus import stopwords
-    
     model_name = "allenai/scibert_scivocab_uncased"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
+    stop_words = read_numpy_hadoop("/temp/stopwords_english.npy").tolist()
 
     papers_df = load_latest_file('paper','/process')
     affiliations_df = load_latest_file('affiliation','/process')
@@ -204,8 +217,7 @@ def clean_text(papers_df):
         s = re.sub(r"n\'t", " not", s)
         s = re.sub(r"\b(1[0-9]{3}|2[0-9]{3})\b", "", s)
         s = re.sub(r'([©\'\"\(\)\!\\])', r' ', s)
-        s = " ".join([word for word in s.split(' ')
-        if word not in stopwords.words('english')])
+        s = " ".join([word for word in s.split(' ') if word not in stop_words])
         s = pattern_name.sub("", s)
         s = re.sub(r'\s+', ' ', s).strip()
         return s
@@ -221,7 +233,6 @@ def clean_text(papers_df):
 
 
 if __name__=="__main__":
-    # initialize()
     date_str = datetime.now().strftime("%Y_%m_%d")
     save_dir = "/process"
     papers_df = load_latest_file('paper','/json')
