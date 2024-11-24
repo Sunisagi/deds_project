@@ -30,7 +30,7 @@ def read_json_hadoop(file_name,return_json = False):
         if return_json:
             return json.loads(content) 
         else:
-            return pd.read_json(content, orient='records') 
+            return pd.read_json(content, orient='records', lines=True) 
 def ls_hadoop(folder):
     set_classpath()
     hdfs = fs.HadoopFileSystem("namenode", 8020)
@@ -64,101 +64,102 @@ def find_latest_file_for_prefix(prefix, file_names):
     return latest_file
 
 def extract_feature(papers_df,authors_df,affiliations_df):
-    folder = '/user/airflow/json'
+    folder = '/scraping'
     new_author = 1
     new_affiliation = 1
     for f in ls_hadoop(folder):
         print(f.base_name)
         json_data = read_json_hadoop(f'{folder}/{f.base_name}',True)
-        for data in find_value_by_key(json_data, "entry"):
-            paper_id = data["id"].split("/")[-1]
-            authors = []
-            paper_affs = []
-            if not isinstance(data["author"], list):
-                aus = [data["author"]]
-            else:
-                aus = data["author"]
-            for name in aus:
-                # Handle "name" and "surname" or "indexed-name"
-                if "." in name["name"].split()[-1]:  # Handle the case where initials are in "name"
-                    indexed_name = name["name"]
-                    surname = indexed_name.split()[0]
-                    initials = indexed_name.split()[1]
-                    given_name = None
-                else:  # Handle the standard case
-                    given_name, surname = name["name"].split()[0], name["name"].split()[-1]
-                    initials = f"{given_name[0]}."
-                    indexed_name = f"{surname} {given_name[0]}."
-
-                existing = authors_df[
-                    (authors_df["given-name"] == given_name) & (authors_df["surname"] == surname)
-                ]
-                if existing.empty:
-                    if "arxiv:affiliation" in name:
-                        if not isinstance(name["arxiv:affiliation"], list):
-                            affs = [name["arxiv:affiliation"]["#text"]]
-                        else:
-                            affs = [aff["#text"] for aff in name["arxiv:affiliation"]]
-                        affiliations = []
-                        for aff_name in affs:
-                            # Check if any name in the DataFrame matches aff_name (case-insensitively)
-                            match_found = False
-                            for _, row in affiliations_df.iterrows():
-                                if "INFN" in aff_name or "Academy of Science" in aff_name:
-                                    if aff_name == row["name"]:
-                                        match_found = True
-                                        matched_affid = row["affid"]
-                                        # print(f"Match found for '{aff_name}': {row['name']}")
-                                        break
-                                elif aff_name in row["name"]:
-                                    if len(aff_name) > len(row["name"]) / 2:
-                                        match_found = True
-                                        matched_affid = row["affid"]
-                                        break
-                                elif row["name"] in aff_name:
-                                    if len(aff_name) / 2 < len(row["name"]):
-                                        matched_affid = row["affid"]
-                                        match_found = True
-                                        break
-
-                            if not match_found:
-                                # If no sufficient match, add a new row to the DataFrame
-                                new_aff_id = f"S{new_affiliation:07d}"
-                                new_affiliation += 1
-                                new_row = {"affid": new_aff_id, "name": aff_name}
-                                affiliations_df = pd.concat([affiliations_df, pd.DataFrame([new_row])], ignore_index=True)
-                                matched_affid = new_aff_id
-                            affiliations.append(matched_affid)
-                            if matched_affid not in paper_affs:
-                                paper_affs.append(matched_affid)
-
-                    new_id = f"S{new_author:09d}"
-                    new_row = pd.DataFrame({
-                        "auid": [new_id],
-                        "given-name": [given_name],
-                        "surname": [surname],
-                        "initials": [initials],
-                        "indexed-name": [indexed_name],
-                        "paper": [[paper_id]],
-                        "affiliation": [affiliations],
-                    })
-                    authors_df = pd.concat([authors_df, new_row], ignore_index=True)
-                    new_author += 1
+        if find_value_by_key(json_data, "entry"):
+            for data in find_value_by_key(json_data, "entry"):
+                paper_id = data["id"].split("/")[-1]
+                authors = []
+                paper_affs = []
+                if not isinstance(data["author"], list):
+                    aus = [data["author"]]
                 else:
-                    new_id = existing["auid"].iloc[0]
-                    idx = existing.index[0]
-                    authors_df.at[idx, "paper"] = authors_df.at[idx, "paper"] + [paper_id]
-                authors.append(str(new_id))
-            new_row = pd.DataFrame({
-                "id": [paper_id],
-                "title": [data["title"].replace("\n", " ")],
-                "description": [data["summary"].replace("\n", " ")],
-                "date": [data["published"]],
-                "year": [data["published"].split("-")[0]],
-                "authors": [authors],
-                "affiliations": [paper_affs],
-            })
-            papers_df = pd.concat([papers_df, new_row], ignore_index=True)
+                    aus = data["author"]
+                for name in aus:
+                    # Handle "name" and "surname" or "indexed-name"
+                    if "." in name["name"].split()[-1]:  # Handle the case where initials are in "name"
+                        indexed_name = name["name"]
+                        surname = indexed_name.split()[0]
+                        initials = indexed_name.split()[1]
+                        given_name = None
+                    else:  # Handle the standard case
+                        given_name, surname = name["name"].split()[0], name["name"].split()[-1]
+                        initials = f"{given_name[0]}."
+                        indexed_name = f"{surname} {given_name[0]}."
+
+                    existing = authors_df[
+                        (authors_df["given-name"] == given_name) & (authors_df["surname"] == surname)
+                    ]
+                    if existing.empty:
+                        affiliations = []
+                        if "arxiv:affiliation" in name:
+                            if not isinstance(name["arxiv:affiliation"], list):
+                                affs = [name["arxiv:affiliation"]["#text"]]
+                            else:
+                                affs = [aff["#text"] for aff in name["arxiv:affiliation"]]
+                            for aff_name in affs:
+                                # Check if any name in the DataFrame matches aff_name (case-insensitively)
+                                match_found = False
+                                for _, row in affiliations_df.iterrows():
+                                    if "INFN" in aff_name or "Academy of Science" in aff_name:
+                                        if aff_name == row["name"]:
+                                            match_found = True
+                                            matched_affid = row["affid"]
+                                            # print(f"Match found for '{aff_name}': {row['name']}")
+                                            break
+                                    elif aff_name in row["name"]:
+                                        if len(aff_name) > len(row["name"]) / 2:
+                                            match_found = True
+                                            matched_affid = row["affid"]
+                                            break
+                                    elif row["name"] in aff_name:
+                                        if len(aff_name) / 2 < len(row["name"]):
+                                            matched_affid = row["affid"]
+                                            match_found = True
+                                            break
+
+                                if not match_found:
+                                    # If no sufficient match, add a new row to the DataFrame
+                                    new_aff_id = f"S{new_affiliation:07d}"
+                                    new_affiliation += 1
+                                    new_row = {"affid": new_aff_id, "name": aff_name}
+                                    affiliations_df = pd.concat([affiliations_df, pd.DataFrame([new_row])], ignore_index=True)
+                                    matched_affid = new_aff_id
+                                affiliations.append(matched_affid)
+                                if matched_affid not in paper_affs:
+                                    paper_affs.append(matched_affid)
+
+                        new_id = f"S{new_author:09d}"
+                        new_row = pd.DataFrame({
+                            "auid": [new_id],
+                            "given-name": [given_name],
+                            "surname": [surname],
+                            "initials": [initials],
+                            "indexed-name": [indexed_name],
+                            "paper": [[paper_id]],
+                            "affiliation": [affiliations],
+                        })
+                        authors_df = pd.concat([authors_df, new_row], ignore_index=True)
+                        new_author += 1
+                    else:
+                        new_id = existing["auid"].iloc[0]
+                        idx = existing.index[0]
+                        authors_df.at[idx, "paper"] = authors_df.at[idx, "paper"] + [paper_id]
+                    authors.append(str(new_id))
+                new_row = pd.DataFrame({
+                    "id": [paper_id],
+                    "title": [data["title"].replace("\n", " ")],
+                    "description": [data["summary"].replace("\n", " ")],
+                    "date": [data["published"]],
+                    "year": [data["published"].split("-")[0]],
+                    "authors": [authors],
+                    "affiliations": [paper_affs],
+                })
+                papers_df = pd.concat([papers_df, new_row], ignore_index=True)
     
     return papers_df,authors_df,affiliations_df
 
@@ -172,8 +173,8 @@ def clean_text(papers_df):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
 
-    papers_df = load_latest_file('paper','/json')
-    affiliations_df = load_latest_file('affiliation','/json')
+    papers_df = load_latest_file('paper','/process')
+    affiliations_df = load_latest_file('affiliation','/process')
 
 
     vocabs = tokenizer.get_vocab()
@@ -228,15 +229,17 @@ if __name__=="__main__":
     affiliations_df = load_latest_file('affiliation','/json')
     papers_df,authors_df,affiliations_df = extract_feature(papers_df,authors_df,affiliations_df)
     path = f"{save_dir}/paper_{date_str}"
-    write_json_hadoop(papers_df.to_json(),path)
+    write_json_hadoop(papers_df.to_json(orient="records", lines=True),path)
 
     path = f"{save_dir}/author_{date_str}"
-    write_json_hadoop(authors_df.to_json(),path)
+    write_json_hadoop(authors_df.to_json(orient="records", lines=True),path)
 
     path = f"{save_dir}/affiliation_{date_str}"
-    write_json_hadoop(affiliations_df.to_json(),path)
+    write_json_hadoop(affiliations_df.to_json(orient="records", lines=True),path)
 
     papers_df = clean_text(papers_df)
 
     path = f"{save_dir}/clean_paper_{date_str}"
-    write_json_hadoop(papers_df.to_json(),path)
+    write_json_hadoop(papers_df.to_json(orient="records", lines=True),path)
+
+    print("Finish")

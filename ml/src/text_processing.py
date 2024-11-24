@@ -66,7 +66,7 @@ def read_json_hadoop(file_name):
     hdfs = fs.HadoopFileSystem("namenode", 8020)
     with hdfs.open_input_stream(file_name) as f:
         content = f.read().decode("utf-8")  
-        df = pd.read_json(content, orient='records') 
+        df = pd.read_json(content, orient='records', lines=True) 
         return df
 def ls_hadoop(folder):
     set_classpath()
@@ -305,16 +305,16 @@ def initialize():
 
     # Save the files with the date added to filenames
     path = f"{save_dir}/paper_{date_str}"
-    write_json_hadoop(papers_df.to_json(),path)
+    write_json_hadoop(papers_df.to_json(orient="records", lines=True),path)
 
     path = f"{save_dir}/cite_{date_str}"
-    write_json_hadoop(citations_df.to_json(),path)
+    write_json_hadoop(citations_df.to_json(orient="records", lines=True),path)
 
     path = f"{save_dir}/author_{date_str}"
-    write_json_hadoop(author_df.to_json(),path)
+    write_json_hadoop(author_df.to_json(orient="records", lines=True),path)
 
     path = f"{save_dir}/affiliation_{date_str}"
-    write_json_hadoop(affiliations_df.to_json(),path)
+    write_json_hadoop(affiliations_df.to_json(orient="records", lines=True),path)
 
 
 def load_latest_file(prefix, extension="json"):

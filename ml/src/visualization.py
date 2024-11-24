@@ -3,28 +3,28 @@ import numpy as np
 import pandas as pd
 from component import *
 from datetime import datetime, timezone
-from functools import partial
+import json
 import plotly.express as px
 import plotly.graph_objects as go
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
 from sklearn.metrics.pairwise import cosine_similarity
-import pickle
-from recommendation import load_latest_file,load_latest_pkl
+from recommendation import TextRecommender,load_latest_file,load_latest_pkl
+import ast
 # Main content
 st.title('Project')
 
 # Cache functions
 @st.cache_resource  # 👈 Add the caching decorator
 def load_model_recomendation():
-    recommender_dir = f"{PROJECT_ROOT}/model/recommender"
+    recommender_dir = "/model/recommender"
     return load_latest_pkl("model",recommender_dir)
 
 @st.cache_data  # 👈 Add the caching decorator
 def load_file(prefix):
     data_dir = '/process'
-    return load_latest_file(data_dir)
+    return load_latest_file(prefix,data_dir)
 
 
 # Session state initialization for mode and paper_id
@@ -153,13 +153,15 @@ elif st.session_state.mode == "Author Information":
             st.write(f"**Initials:** {author_row['initials']}")
             st.write(f"**Surname:** {author_row['surname']}")
             st.write(f"**Indexed Name:** {author_row['indexed-name']}")
+            st.write(author_row['affliation'])
             # Ensure affliation is a list, process each element, and create a list of aff_ids
-            if isinstance(author_row['affliation'], str):
+            au_affliations = ast.literal_eval(author_row['affliation'])
+            if isinstance(au_affliations, str):
                 # If affliation is a string, convert it to a single-element list
-                aff_ids = [str(int(author_row['affliation'].split(".")[0]))]
-            elif isinstance(author_row['affliation'], list):
+                aff_ids = [str(au_affliations)]
+            elif isinstance(au_affliations, list):
                 # If affliation is already a list, process each element
-                aff_ids = [str(int(aff.split(".")[0])) for aff in author_row['affliation'] if isinstance(aff, str)]
+                aff_ids = [str(aff) for aff in au_affliations]
             else:
                 aff_ids = []  # Handle unexpected cases gracefully
 

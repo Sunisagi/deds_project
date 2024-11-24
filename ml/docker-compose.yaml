@@ -7,11 +7,26 @@ services:
             - ./data:/opt/data
         ports:
             - 8501:8501
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: 1
+                          capabilities: [gpu]
     flask-app:
         build: ./
         command: python3 /opt/src/retrain_app.py
         volumes:
             - ./src:/opt/src
+            - ./data:/opt/data
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: 1
+                          capabilities: [gpu]
 
 networks:
   default:

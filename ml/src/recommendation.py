@@ -5,16 +5,17 @@ import re
 import nltk 
 import pandas as pd
 from difflib import SequenceMatcher
-import glob
 from datetime import datetime
 from transformers import AutoTokenizer, AutoModel
 import json
 import os
 from tqdm import tqdm
 import pickle
-from pathlib import Path
 from connection_setup import set_classpath
 from pyarrow import fs
+import io
+import gc
+from torch.utils.data import DataLoader, Dataset
 
 nltk.download("stopwords")
 from nltk.corpus import stopwords
@@ -28,7 +29,21 @@ def read_json_hadoop(file_name, return_json=False):
         if return_json:
             return json.loads(content)
         else:
-            return pd.read_json(content, orient='records')
+            return pd.read_json(content, orient='records', lines=True)
+
+def read_numpy_hadoop(file_name):
+    set_classpath()
+    hdfs = fs.HadoopFileSystem("namenode", 8020)
+
+    # Read the file from HDFS into memory
+    with hdfs.open_input_stream(file_name) as file:
+        data = file.read()
+
+    # Deserialize the data into a NumPy array
+    with io.BytesIO(data) as buffer:
+        array = np.load(buffer)
+
+    return array
 
 # List all files in a folder on Hadoop
 def ls_hadoop(folder):
@@ -54,14 +69,14 @@ def find_latest_file_for_prefix(prefix, file_names):
     return filtered_files[-1] if filtered_files else None
 
 # Function to load the latest file based on prefix and folder
-def load_latest_file(prefix, folder):
+def load_latest_numpy(prefix, folder):
     file_names = [f.base_name for f in ls_hadoop(folder)]
     file_name = find_latest_file_for_prefix(prefix, file_names)
     if file_name is None:
         return None
 
     print(f"Load File: {folder}/{file_name}")
-    return read_json_hadoop(f"{folder}/{file_name}")
+    return read_numpy_hadoop(f"{folder}/{file_name}")
 
 # Additional functions for specific file types
 def load_latest_json(prefix, folder):
@@ -72,6 +87,15 @@ def load_latest_json(prefix, folder):
 
     print(f"Load File: {folder}/{file_name}")
     return read_json_hadoop(f"{folder}/{file_name}", return_json=True)
+
+def load_latest_file(prefix, folder):
+    file_names = [f.base_name for f in ls_hadoop(folder)]
+    file_name = find_latest_file_for_prefix(prefix, file_names)
+    if file_name is None:
+        return None
+
+    print(f"Load File: {folder}/{file_name}")
+    return read_json_hadoop(f"{folder}/{file_name}")
 
 def load_latest_pkl(prefix, folder):
     file_names = [f.base_name for f in ls_hadoop(folder)]
@@ -85,11 +109,23 @@ def load_latest_pkl(prefix, folder):
     with hdfs.open_input_stream(f"{folder}/{file_name}") as f:
         return pickle.load(f)
 
-def write_json_hadoop(json_data,file_name) :
+def write_json_hadoop(data,file_name) :
     set_classpath()
+    json_data = json.dumps(data)
     hdfs = fs.HadoopFileSystem("namenode", 8020)
     with hdfs.open_output_stream(f'{file_name}.json') as file :
         file.write(json_data.encode('utf-8'))
+
+def write_numpy_hadoop(data, file_name):
+    set_classpath()
+    hdfs = fs.HadoopFileSystem("namenode", 8020)
+
+    # Serialize the NumPy data into a bytes stream
+    with io.BytesIO() as buffer:
+        np.save(buffer, data)
+        buffer.seek(0)  # Reset buffer position to the beginning
+        with hdfs.open_output_stream(f'{file_name}.npy') as file:
+            file.write(buffer.read())
 
 def write_pickle_hadoop(data, file_name):
     set_classpath()
@@ -99,7 +135,7 @@ def write_pickle_hadoop(data, file_name):
 
 
     
-def create_text_similarity_json(paper_df, model, tokenizer,save_dir):
+def create_text_similarity_json(paper_df, model, tokenizer, save_dir):
     date_str = datetime.now().strftime("%Y_%m_%d")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -110,32 +146,37 @@ def create_text_similarity_json(paper_df, model, tokenizer,save_dir):
         with torch.no_grad():
             outputs = model(**inputs)
         embeddings = outputs.last_hidden_state.mean(dim=1).cpu()
-        return embeddings.squeeze().numpy().tolist()  # Convert to list for JSON compatibility
+        return embeddings.squeeze().numpy()  # Keep as NumPy array
     
-    # Create dictionaries to store embeddings for titles and abstracts
-    title_embeddings_json = {}
-    abstract_embeddings_json = {}
-    
-    # Generate embeddings for titles and abstracts
+    # Initialize lists to store embeddings and indices
+    title_embeddings = []
+    abstract_embeddings = []
+    index_to_id = []
+
+    # Generate embeddings for titles and save them to arrays
     for _, row in tqdm(paper_df.iterrows(), desc="Generating Embeddings", total=len(paper_df)):
         paper_id = row['id']
-        
-        # Get title and abstract embeddings
+        index_to_id.append(paper_id)  # Maintain index-to-id mapping
         title_embedding = get_embedding(row['title-clean'], max_length=128)
+        title_embeddings.append(title_embedding)
+
         abstract_embedding = get_embedding(row['description-clean'], max_length=512)
-        
-        # Store embeddings in the dictionaries
-        title_embeddings_json[paper_id] = title_embedding
-        abstract_embeddings_json[paper_id] = abstract_embedding
+        abstract_embeddings.append(abstract_embedding)
 
-        write_pickle_hadoop(title_embeddings_json, f"{save_dir}/title_embeddings_{date_str}.json")
-        write_pickle_hadoop(abstract_embeddings_json, f"{save_dir}/abstract_embeddings_{date_str}.json")
+    # Convert title embeddings to a NumPy array and save
+    title_embeddings_array = np.array(title_embeddings)
+    abstract_embeddings_array = np.array(abstract_embeddings)
 
-    print("Title and abstract embeddings saved to title_embeddings.json and abstract_embeddings.json.")
-
+    # print(title_embeddings_array[:5,:5])
+    # print(abstract_embeddings_array[:5,:5])
+    
+    write_numpy_hadoop(title_embeddings_array, f"{save_dir}/title_embeddings_{date_str}")
+    write_numpy_hadoop(abstract_embeddings_array, f"{save_dir}/abstract_embeddings_{date_str}")
+    write_numpy_hadoop(np.array(index_to_id), f"{save_dir}/index_to_id_{date_str}")
+    print("Embeddings and index-to-id mapping saved successfully.")
 
 class TextRecommender:
-    def __init__(self, model, tokenizer, paper_df, title_embeddings, abstract_embeddings, affiliations_df, top_n=5):
+    def __init__(self, model, tokenizer, paper_df,id_to_index, title_embeddings, abstract_embeddings, affiliations_df, top_n=5):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
         self.tokenizer = tokenizer
@@ -143,12 +184,13 @@ class TextRecommender:
         self.affiliations_df = affiliations_df
         self.top_n = top_n
 
-        # Prepare title and abstract embeddings matrices in the order of paper_df IDs
-        self.title_matrix = np.vstack([title_embeddings[paper_id] for paper_id in paper_df['id']])
-        self.abstract_matrix = np.vstack([abstract_embeddings[paper_id] for paper_id in paper_df['id']])
+        paper_indices = []
+        for idx, paper in paper_df.iterrows():
+            paper_id = paper['id']  # Extract the paper_id from the current row
+            paper_indices.append(id_to_index[paper_id])  # Get the index from id_to_index and append it
 
-        self.title_similarity_matrix = cosine_similarity(self.title_matrix)
-        self.abstract_similarity_matrix = cosine_similarity(self.abstract_matrix)
+        self.title_matrix = title_embeddings[paper_indices]
+        self.abstract_matrix = abstract_embeddings[paper_indices]
 
         # Prepare city and country terms for filtering
         self.country_or_city = affiliations_df.city.unique().tolist() + affiliations_df.country.unique().tolist()
@@ -416,9 +458,18 @@ class TextRecommender:
         # Get the index of the paper in the DataFrame
         paper = self.paper_df[self.paper_df['id'] == paper_id]
         paper_idx = paper.index[0]
+
+        def get_row_cosine_similarity(matrix, row_index):
+            row_vector = matrix[row_index].reshape(1, -1)  # Reshape to 2D array
+            similarity = cosine_similarity(row_vector, matrix)  # Compute similarity
+            return similarity.flatten()  # Flatten the result to a 1D array
+
+        # Example usage:
+        title_similarity_for_row = get_row_cosine_similarity(self.title_matrix, 0)  # Row 0
+        abstract_similarity_for_row = get_row_cosine_similarity(self.abstract_matrix, 0)
         
         # Calculate combined similarity scores for titles and abstracts
-        combined_similarity = 0.5 * self.title_similarity_matrix[paper_idx] + 0.5 * self.abstract_similarity_matrix[paper_idx]
+        combined_similarity = 0.5 * title_similarity_for_row + 0.5 * abstract_similarity_for_row
 
         # Sort by similarity score and get the indices of the top N similar papers, excluding the input paper itself
         similar_indices = np.argsort(combined_similarity)[::-1]
@@ -446,14 +497,14 @@ def make_model(SET_RETRAIN  = False):
     embedding_dir ="/model/embedding"
     recommender_dir ="/model/recommender"
 
-    date_str = datetime.now().strftime("%Y_%m_%d")
-
     model_name = "allenai/scibert_scivocab_uncased"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
 
     papers_df = load_latest_file(f"clean_paper","/process")
+    papers_df.reset_index(drop=True, inplace=True)
     affiliations_df = load_latest_file(f"affiliation","/process")
+    affiliations_df.reset_index(drop=True, inplace=True)
 
     # Convert specific columns to strings
     if papers_df is not None:
@@ -468,18 +519,15 @@ def make_model(SET_RETRAIN  = False):
         create_text_similarity_json(papers_df, model, tokenizer,embedding_dir)
 
     # Load title and abstract embeddings from JSON
-    title_embeddings = load_latest_json("title_embeddings",embedding_dir)
-    abstract_embeddings = load_latest_json("abstract_embeddings",embedding_dir)
-
-    # # Convert embeddings from dictionary to tensor for further computation, if needed
-    # title_similarity_matrix = torch.tensor([title_embeddings[paper_id] for paper_id in papers_df['id']])
-    # abstract_similarity_matrix = torch.tensor([abstract_embeddings[paper_id] for paper_id in papers_df['id']])
+    title_embeddings = load_latest_numpy("title_embeddings",embedding_dir)
+    abstract_embeddings = load_latest_numpy("abstract_embeddings",embedding_dir)
+    index_to_id = load_latest_numpy("index_to_id",embedding_dir)
+    id_to_index = {paper_id: idx for idx, paper_id in enumerate(index_to_id)}
 
     print("Loaded title and abstract similarity matrices.")
 
-    recommender = TextRecommender(model, tokenizer, papers_df, title_embeddings, abstract_embeddings, affiliations_df, top_n=20)
-    # with open(f"{recommender_dir}/model_{date_str}.pkl", "wb") as file:
-    #     pickle.dump(recommender, file)
+    recommender = TextRecommender(model, tokenizer, papers_df,id_to_index, title_embeddings, abstract_embeddings, affiliations_df, top_n=20)
+    print("Finish")
     return recommender 
 
 def save_model(recommender):
@@ -491,3 +539,10 @@ def save_model(recommender):
 def load_model():
     recommender_dir = "/model/recommender"
     return load_latest_pkl("model",recommender_dir)
+
+if __name__=="__main__":
+    model = make_model(True)
+    save_model(model)
+    # print("start")
+    # recommender_dir = "/model/recommender"
+    # print(model.get_recommendations("brain damage 2018"))
