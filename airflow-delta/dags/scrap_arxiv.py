@@ -32,27 +32,37 @@ def scraping_arxiv() :
             }
             Variable.set(key="scraping_config", value=vars, serialize_json=True) 
         year = vars['year']
-        start = vars['start']
-        max_results = vars['max_results'] 
+        start = int(vars['start'])
+        max_results = int(vars['max_results'])
         max_retries = 5
+        num_retries = 1
+        results = []
 
         query = f'submittedDate:[{year}01010000 TO {year}12312359]'
-        url = f'http://export.arxiv.org/api/query?search_query={query}&start={start}&max_results={max_results}'
-        for i in range(1, max_retries+1) :
-            print(f'retry number: {i}')
+        while (max_results > 0) and (num_retries <= max_retries) :
+            url = f'http://export.arxiv.org/api/query?search_query={query}&start={start}&max_results={max_results}'
+            print(f'retry number: {num_retries}')
             response = requests.get(url)
             if response.status_code == 200:
                 dict_data = xmltodict.parse(response.content)
                 if 'entry' in dict_data['feed'] :
-                    json_data = json.dumps(dict_data, indent=4)  
-                    print('scraping success')          
-                    return json_data
+                    num_results = len(dict_data['feed']['entry'])
+                    print(f'query: {num_results}')
+                    max_results -= num_results
+                    start += num_results
+                    results.append(dict_data)
                 else :
                     time.sleep(20)
                     print('No data return')
+                num_retries += 1
             else:
-                raise ConnectionError(f"Error: Received status code {response.status_code} from arXiv API.")   
-        raise TimeoutError(f"No data return after: {max_retries}")   
+                raise ConnectionError(f"Error: Received status code {response.status_code} from arXiv API.") 
+        base_json = results.pop(0)   
+        for x in results :
+            base_json['feed']['entry'] += x['feed']['entry']  
+        json_data = json.dumps(base_json, indent=4)  
+        print('scraping success')          
+        return json_data 
 
     @task()
     def write_json(json_data) :
