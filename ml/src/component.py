@@ -19,7 +19,7 @@ def create_table(df,show_meta=True):
     df['rank'] = range(1, len(df) + 1)
     
     # Handle None (empty) fields
-    df.fillna('N/A', inplace=True)
+    
 
     for index, row in df.iterrows():
         # Assign a random light color for each row (simulating the original effect)
@@ -115,7 +115,6 @@ def create_author(df):
         st.session_state.author_id = arg
 
     # Handle None (empty) fields
-    df.fillna('N/A', inplace=True)
 
     with st.container():
         col1, col2, col3, col4, col5 = st.columns([2, 1, 2, 2, 1])
@@ -153,7 +152,6 @@ def create_normal_table(df):
         st.session_state.paper_id= arg  # Store the argument in session state
         st.session_state.author_id= None 
 
-    df.fillna('N/A', inplace=True)
 
     for index, row in df.iterrows():
         # Assign a random light color for each row (simulating the original effect)

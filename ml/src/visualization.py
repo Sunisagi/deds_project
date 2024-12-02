@@ -11,6 +11,7 @@ from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
 from sklearn.metrics.pairwise import cosine_similarity
 from recommendation import TextRecommender,load_latest_file,load_latest_pkl
+import torch
 import ast
 # Main content
 st.title('Project')
@@ -24,7 +25,9 @@ def load_model_recomendation():
 @st.cache_data  # 👈 Add the caching decorator
 def load_file(prefix):
     data_dir = '/process'
-    return load_latest_file(prefix,data_dir)
+    df = load_latest_file(prefix,data_dir)
+    df = df.fillna('N/A')
+    return df
 
 
 # Session state initialization for mode and paper_id
@@ -42,7 +45,7 @@ affiliations_df = load_file("affiliation")
 papers_df['id'] = papers_df['id'].astype(str)
 affiliations_df['affid'] = affiliations_df['affid'].astype(str)
 authors_df['auid'] = authors_df['auid'].astype(str)
-authors_df['affliation'] = authors_df['affliation'].astype(str)
+authors_df['affiliation'] = authors_df['affiliation'].astype(str)
 
 st.sidebar.header('Mode')
 
@@ -67,10 +70,10 @@ option = st.sidebar.selectbox(
 
 st.sidebar.write('You selected:', option)
 
-if st.session_state.mode :
-    st.write(st.session_state.mode)
-    st.write(f"Received paper: {st.session_state.paper_id}")
-    st.write(f"Received author: {st.session_state.author_id}")
+# if st.session_state.mode :
+#     st.write(st.session_state.mode)
+#     st.write(f"Received paper: {st.session_state.paper_id}")
+#     st.write(f"Received author: {st.session_state.author_id}")
 # Show content based on the selected mode
 if st.session_state.mode == "Recommendation":
     with st.container():
@@ -153,19 +156,22 @@ elif st.session_state.mode == "Author Information":
             st.write(f"**Initials:** {author_row['initials']}")
             st.write(f"**Surname:** {author_row['surname']}")
             st.write(f"**Indexed Name:** {author_row['indexed-name']}")
-            st.write(author_row['affliation'])
-            # Ensure affliation is a list, process each element, and create a list of aff_ids
-            au_affliations = ast.literal_eval(author_row['affliation'])
-            if isinstance(au_affliations, str):
-                # If affliation is a string, convert it to a single-element list
-                aff_ids = [str(au_affliations)]
-            elif isinstance(au_affliations, list):
-                # If affliation is already a list, process each element
-                aff_ids = [str(aff) for aff in au_affliations]
+            # st.write(author_row['affiliation'])
+            # Ensure affiliation is a list, process each element, and create a list of aff_ids
+            if author_row['affiliation'] != "N/A":
+                au_affiliations = ast.literal_eval(author_row['affiliation'])
+                if isinstance(au_affiliations, str):
+                    # If affiliation is a string, convert it to a single-element list
+                    aff_ids = [str(au_affiliations)]
+                elif isinstance(au_affiliations, list):
+                    # If affiliation is already a list, process each element
+                    aff_ids = [str(aff) for aff in au_affiliations]
+                else:
+                    aff_ids = []  # Handle unexpected cases gracefully
             else:
-                aff_ids = []  # Handle unexpected cases gracefully
+                aff_ids = []
 
-            st.write(aff_ids) 
+            # st.write(aff_ids) 
 
             # Get the related papers
             related_papers = papers_df[papers_df['authors'].apply(lambda x: author_id in x if isinstance(x, list) else False)]
@@ -197,129 +203,93 @@ else:
     st.title("Dataset Visualization")
 
     # --- First Visualization: Group Papers by Number of Authors ---
-    st.subheader("1. Papers Grouped by Number of Authors")
+    st.subheader("1. Number of Papers per Year")
 
-    # Compute number of authors per paper
-    papers_df["author_count"] = papers_df["authors"].apply(lambda x: len(x) if isinstance(x, list) else 0)
-
-    # Group by author count
-    papers_grouped = papers_df.groupby("author_count").size().reset_index(name="count")
+    num_paper_per_year = papers_df.groupby("year").size().reset_index(name="count")
 
     # All groups
-    grouped_bar_all = px.bar(
-        papers_grouped,
-        x="author_count",
-        y="count",
-        title="All Papers Grouped by Number of Authors",
-        labels={"author_count": "Number of Authors", "count": "Number of Papers"},
-    )
-    st.plotly_chart(grouped_bar_all, use_container_width=True)
+
+    grouped_fig = go.Figure()
+    grouped_fig.add_trace(go.Scatter(
+        x=num_paper_per_year["year"],
+        y=num_paper_per_year["count"],
+        mode='lines+markers',
+        name='Line',
+    ))
+
+    grouped_fig.update_layout(
+        yaxis=dict(range=[0, num_paper_per_year["count"].max()*1.2]),
+        title="Number of Papers per Year",
+        xaxis_title="Year",
+        yaxis_title="Number of Papers"
+        )
+    st.plotly_chart(grouped_fig, use_container_width=True)
 
     # Groups with more than 2 authors per paper
-    papers_grouped_filtered = papers_grouped[papers_grouped["author_count"] > 20]
+
+    num_paper_cat_year = papers_df.explode('class').groupby(['class', 'year']).size().reset_index(name='count')
+
+    category_list = num_paper_cat_year['class'].unique().tolist()
+    year_list = num_paper_cat_year['year'].unique().tolist()
+
+    top_3_cat = num_paper_cat_year.groupby('class').sum().nlargest(3, 'count')
+
+    st.subheader("Top 3 Category with the Most number of Papers")
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Indicator(
+        value = top_3_cat.iloc[1]['count'],
+        title = {"text": f"Second Category: {top_3_cat.index[1]} <br> with total Papers: "},
+        domain = {'x': [0, 0.33], 'y': [0.2, 0.8]}))
+
+    fig.add_trace(go.Indicator(
+        value = top_3_cat.iloc[0]['count'],
+        title = {"text": f"First Category: {top_3_cat.index[0]} <br> with total Papers: "},
+        domain = {'x': [0.33, 0.67], 'y': [0.4, 1]}))
+
+    fig.add_trace(go.Indicator(
+        value = top_3_cat.iloc[2]['count'],
+        title = {"text": f"Third Category: {top_3_cat.index[2]} <br> with total Papers: "},
+        domain = {'x': [0.67, 1], 'y': [0, 0.6]}))
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    col1, col2 = st.columns(2)
+
+    with col1 :
+        input_year = st.multiselect('Year', options=year_list + ['All'], default='All')
+        if "All" in input_year:
+            input_year = year_list
+
+    with col2 :
+        input_cat = st.multiselect('Category', options=category_list + ['All'], default='All')
+        if "All" in input_cat:
+            input_cat = category_list
+
     grouped_bar_filtered = px.bar(
-        papers_grouped_filtered,
-        x="author_count",
+        num_paper_cat_year.loc[(num_paper_cat_year['year'].isin(input_year)) & (num_paper_cat_year['class'].isin(input_cat))],
+        x="year",
         y="count",
-        title="Papers with More Than 2 Authors Grouped by Number of Authors",
-        labels={"author_count": "Number of Authors", "count": "Number of Papers"},
+        color='class',
+        barmode='group',    
+        title=f"Number of Papers for each Category by Year",
+        labels={"year": "Year", "count": "Number of Papers", "class": "Category"},
     )
     st.plotly_chart(grouped_bar_filtered, use_container_width=True)
 
     # --- Second Visualization: Group Authors by Number of Papers ---
-    st.subheader("2. Authors Grouped by Number of Papers")
+    st.subheader("2. Top K Publisher by Number of Papers")
 
-    # Compute number of papers per author
-    author_paper_counts = {}
-    for authors in papers_df["authors"]:
-        if isinstance(authors, list):
-            for author in authors:
-                author_paper_counts[author] = author_paper_counts.get(author, 0) + 1
+    publisher_grouped = papers_df.groupby('publishername').size().reset_index(name='count')
 
-    # Convert to DataFrame
-    author_paper_df = pd.DataFrame(list(author_paper_counts.items()), columns=["Author ID", "Paper Count"])
-
-    # Group by paper count
-    author_grouped = author_paper_df.groupby("Paper Count").size().reset_index(name="count")
+    top_k = st.slider("Top K Publisher", min_value=1, max_value=10, value=10)
 
     # All groups
-    author_bar_all = px.bar(
-        author_grouped,
-        x="Paper Count",
+    publisher_bar_all = px.bar(
+        publisher_grouped.nlargest(n=top_k, columns='count'),
+        x="publishername",
         y="count",
-        title="All Authors Grouped by Number of Papers",
-        labels={"Paper Count": "Number of Papers", "count": "Number of Authors"},
+        title=f"Top {top_k} Publisher by Number of Papers",
     )
-    st.plotly_chart(author_bar_all, use_container_width=True)
-
-    # Groups with more than 2 papers per author
-    author_grouped_filtered = author_grouped[author_grouped["Paper Count"] > 10]
-    author_bar_filtered = px.bar(
-        author_grouped_filtered,
-        x="Paper Count",
-        y="count",
-        title="Authors with More Than 2 Papers Grouped by Number of Papers",
-        labels={"Paper Count": "Number of Papers", "count": "Number of Authors"},
-    )
-    st.plotly_chart(author_bar_filtered, use_container_width=True)
-
-    # # --- Third Visualization: Elbow Method ---
-    # st.subheader("3. Elbow Method for Clustering")
-
-    # # Generate similarity matrices for titles and abstracts
-    # title_matrix = model.title_similarity_matrix  # Replace with precomputed matrix
-    # abstract_matrix = model.abstract_similarity_matrix # Replace with precomputed matrix
-
-    # def elbow_method(matrix, max_clusters=10):
-    #     distortions = []
-    #     for k in range(2, max_clusters + 1):
-    #         kmeans = KMeans(n_clusters=k, random_state=42)
-    #         kmeans.fit(matrix)
-    #         distortions.append(kmeans.inertia_)
-    #     return distortions
-
-    # # Elbow for title
-    # title_distortions = elbow_method(title_matrix)
-    # abstract_distortions = elbow_method(abstract_matrix)
-
-    # # Create Elbow Chart
-    # elbow_chart = go.Figure()
-    # elbow_chart.add_trace(go.Scatter(x=list(range(2, 11)), y=title_distortions, mode='lines+markers', name="Title"))
-    # elbow_chart.add_trace(go.Scatter(x=list(range(2, 11)), y=abstract_distortions, mode='lines+markers', name="Abstract"))
-    # elbow_chart.update_layout(
-    #     title="Elbow Method for Clustering",
-    #     xaxis_title="Number of Clusters",
-    #     yaxis_title="Distortion",
-    # )
-    # st.plotly_chart(elbow_chart, use_container_width=True)
-
-    # # --- Fourth Visualization: Clustering ---
-    # st.subheader("4. Clustering Visualization")
-
-    # def plot_clusters(matrix, n_clusters, title):
-    #     kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-    #     labels = kmeans.fit_predict(matrix)
-        
-    #     # Reduce dimensions for visualization
-    #     pca = PCA(n_components=2)
-    #     reduced_data = pca.fit_transform(matrix)
-        
-    #     # Create Scatter Plot
-    #     cluster_chart = px.scatter(
-    #         x=reduced_data[:, 0],
-    #         y=reduced_data[:, 1],
-    #         color=labels.astype(str),
-    #         title=title,
-    #         labels={"x": "PCA 1", "y": "PCA 2", "color": "Cluster"},
-    #     )
-    #     return cluster_chart
-
-    # # Plot Clusters
-    # optimal_title_clusters = 4  # Replace with the result of elbow method analysis for title
-    # optimal_abstract_clusters = 4  # Replace with the result of elbow method analysis for abstract
-
-    # st.write("### Clusters based on Title Similarity")
-    # st.plotly_chart(plot_clusters(title_matrix, optimal_title_clusters, "Clusters (Title Similarity)"), use_container_width=True)
-
-    # st.write("### Clusters based on Abstract Similarity")
-    # st.plotly_chart(plot_clusters(abstract_matrix, optimal_abstract_clusters, "Clusters (Abstract Similarity)"), use_container_width=True)
+    st.plotly_chart(publisher_bar_all, use_container_width=True)

@@ -263,7 +263,7 @@ def initialize():
                                         "initials": a.get("ce:initials",None),
                                         "surname": a.get("ce:surname",None),
                                         "indexed-name": a.get("ce:indexed-name",None),
-                                        "affliation": [aff_id],
+                                        "affiliation": [aff_id],
                                         "paper" : [],
                                         # 'paper_seq':[]
                                     }
@@ -280,11 +280,11 @@ def initialize():
                                     if authors_name[a["@auid"]]["indexed-name"] is None and a.get("ce:indexed-name"):
                                         authors_name[a["@auid"]]["indexed-name"] = a.get("ce:indexed-name")
 
-                                    if authors_name[a["@auid"]]["affliation"] is None and aff_id:
-                                        authors_name[a["@auid"]]["affliation"] = [str(aff_id)]
+                                    if authors_name[a["@auid"]]["affiliation"] is None and aff_id:
+                                        authors_name[a["@auid"]]["affiliation"] = [str(aff_id)]
                                         
-                                    elif aff_id and str(aff_id) not in authors_name[a["@auid"]]["affliation"]:
-                                        authors_name[a["@auid"]]["affliation"].append(str(aff_id))
+                                    elif aff_id and str(aff_id) not in authors_name[a["@auid"]]["affiliation"]:
+                                        authors_name[a["@auid"]]["affiliation"].append(str(aff_id))
 
                                 if paper_id not in authors_name[a["@auid"]]["paper"]:
                                     authors_name[a["@auid"]]["paper"].append(paper_id)
@@ -355,8 +355,8 @@ def load_latest_file(prefix, extension="json"):
         return None
     
 
-if __name__=="__main__":
-    initialize()
+# if __name__=="__main__":
+#     initialize()
     # file_names = ls_hadoop('/json')
     # data = read_json_hadoop(f'/json/{file_names[0].base_name}')
     

@@ -78,16 +78,23 @@ def find_latest_file_for_prefix(prefix, file_names):
     
     return latest_file
 
-def extract_feature(papers_df,authors_df,affiliations_df):
+def extract_feature(authors_df,affiliations_df):
     folder = '/scraping'
     new_author = 1
     new_affiliation = 1
+    new_paper = []
+    processed_paper_ids = set() 
     for f in ls_hadoop(folder):
         print(f.base_name)
         json_data = read_json_hadoop(f'{folder}/{f.base_name}',True)
         if find_value_by_key(json_data, "entry"):
             for data in find_value_by_key(json_data, "entry"):
                 paper_id = data["id"].split("/")[-1]
+
+                if paper_id in processed_paper_ids:
+                    print(f"Skipping already processed paper: {paper_id}")
+                    continue
+
                 authors = []
                 paper_affs = []
                 if not isinstance(data["author"], list):
@@ -174,20 +181,22 @@ def extract_feature(papers_df,authors_df,affiliations_df):
                     "authors": [authors],
                     "affiliations": [paper_affs],
                 })
-                papers_df = pd.concat([papers_df, new_row], ignore_index=True)
+                new_paper.append(new_row)
+                processed_paper_ids.add(paper_id)
     
-    return papers_df,authors_df,affiliations_df
+    new_paper_df = pd.concat(new_paper, ignore_index=True)
+    
+    return new_paper_df,authors_df,affiliations_df
 
 
 
-def clean_text(papers_df):
+def clean_text(papers_df,affiliations_df):
     model_name = "allenai/scibert_scivocab_uncased"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModel.from_pretrained(model_name)
     stop_words = read_numpy_hadoop("/temp/stopwords_english.npy").tolist()
 
-    papers_df = load_latest_file('paper','/process')
-    affiliations_df = load_latest_file('affiliation','/process')
+    # papers_df = load_latest_file('paper','/process')
+    # affiliations_df = load_latest_file('affiliation','/process')
 
 
     vocabs = tokenizer.get_vocab()
@@ -221,36 +230,51 @@ def clean_text(papers_df):
         s = pattern_name.sub("", s)
         s = re.sub(r'\s+', ' ', s).strip()
         return s
-    
-    # Enable tqdm with pandas apply
-    tqdm.pandas()
 
-    # Apply text preprocessing with progress tracking
-    papers_df['title-clean'] = papers_df['title'].progress_apply(text_preprocessing)
-    papers_df['description-clean'] = papers_df['description'].progress_apply(text_preprocessing)
+    papers_df['title-clean'] = papers_df['title'].apply(text_preprocessing)
+    print("Title Are Cleaned")
+    papers_df['description-clean'] = papers_df['description'].apply(text_preprocessing)
+    print("Abstract Are Cleaned")
 
     return papers_df
 
+def initialize_clean():
+    date_str = datetime.now().strftime("%Y_%m_%d")
+    papers_df = load_latest_file('paper','/json')
+    affiliations_df = load_latest_file('affiliation','/json')
+    clean_papers_df = clean_text(papers_df,affiliations_df)
+    path = f"/json/clean_paper_{date_str}"
+    write_json_hadoop(clean_papers_df.to_json(orient="records", lines=True),path)
 
-if __name__=="__main__":
+def clean_scarpe():
     date_str = datetime.now().strftime("%Y_%m_%d")
     save_dir = "/process"
-    papers_df = load_latest_file('paper','/json')
     authors_df = load_latest_file('author','/json')
     affiliations_df = load_latest_file('affiliation','/json')
-    papers_df,authors_df,affiliations_df = extract_feature(papers_df,authors_df,affiliations_df)
-    path = f"{save_dir}/paper_{date_str}"
-    write_json_hadoop(papers_df.to_json(orient="records", lines=True),path)
-
+    new_paper_df,authors_df,affiliations_df = extract_feature(authors_df,affiliations_df)
+    # path = f"{save_dir}/paper_{date_str}"
+    # write_json_hadoop(papers_df.to_json(orient="records", lines=True),path)
     path = f"{save_dir}/author_{date_str}"
     write_json_hadoop(authors_df.to_json(orient="records", lines=True),path)
 
     path = f"{save_dir}/affiliation_{date_str}"
     write_json_hadoop(affiliations_df.to_json(orient="records", lines=True),path)
-
-    papers_df = clean_text(papers_df)
+    
+    papers_df = load_latest_file('clean_paper','/json')
+    print(len(new_paper_df))
+    new_paper_df = clean_text(new_paper_df,affiliations_df)
+    papers_df = pd.concat([papers_df,new_paper_df], ignore_index=True)
 
     path = f"{save_dir}/clean_paper_{date_str}"
     write_json_hadoop(papers_df.to_json(orient="records", lines=True),path)
 
+    papers_df = papers_df.drop(columns=["title-clean", "description-clean"])
+    path = f"{save_dir}/paper_{date_str}"
+    write_json_hadoop(papers_df.to_json(orient="records", lines=True),path)
+
     print("Finish")
+
+
+if __name__=="__main__":
+    clean_scarpe()
+    

@@ -153,7 +153,7 @@ def create_text_similarity_json(paper_df, model, tokenizer, save_dir):
     index_to_id = []
 
     # Generate embeddings for titles and save them to arrays
-    for _, row in tqdm(paper_df.iterrows(), desc="Generating Embeddings", total=len(paper_df)):
+    for _, row in paper_df.iterrows():
         paper_id = row['id']
         index_to_id.append(paper_id)  # Maintain index-to-id mapping
         title_embedding = get_embedding(row['title-clean'], max_length=128)
@@ -507,12 +507,19 @@ def make_model(SET_RETRAIN  = False):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
 
-    papers_df = load_latest_file(f"clean_paper","/process")
+    clean_papers_df = load_latest_file(f"clean_paper","/process")
+    clean_papers_df.reset_index(drop=True, inplace=True)
+
+    papers_df = load_latest_file(f"paper","/process")
     papers_df.reset_index(drop=True, inplace=True)
+
     affiliations_df = load_latest_file(f"affiliation","/process")
     affiliations_df.reset_index(drop=True, inplace=True)
 
     # Convert specific columns to strings
+    if clean_papers_df is not None:
+        clean_papers_df['id'] = clean_papers_df['id'].astype(str)
+    
     if papers_df is not None:
         papers_df['id'] = papers_df['id'].astype(str)
 
@@ -522,7 +529,7 @@ def make_model(SET_RETRAIN  = False):
     tqdm.pandas()
     # Main logic for setting up the similarity matrices
     if SET_RETRAIN:
-        create_text_similarity_json(papers_df, model, tokenizer,embedding_dir)
+        create_text_similarity_json(clean_papers_df, model, tokenizer,embedding_dir)
 
     # Load title and abstract embeddings from JSON
     title_embeddings = load_latest_numpy("title_embeddings",embedding_dir)
