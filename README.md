@@ -27,20 +27,6 @@ cd ml
 docker-compose up -d
 ```
 
-### Setup Spark
-
-```sh
-cd spark-delta
-docker-compose up -d
-```
-
-### Setup Confuent/Kafka
-
-```sh
-cd Kafka
-docker-compose up -d
-```
-
 ### To Stop container
 
 ```sh
@@ -51,15 +37,6 @@ To remove volume
 docker-compose down -v
 ```
 
-### Setup Spark connection in Airflow
-From Airflow web UI
-
-admin -> connections -> new connection ( + button)
-
-config connection as follow
-
-![alt text](image.png)
-
 ### Setup retrain ml connection in Airflow
 From Airflow web UI
 
@@ -67,4 +44,4 @@ admin -> connections -> new connection ( + button)
 
 config connection as follow
 
-![alt text](image-1.png)
+![alt text](image.png)
