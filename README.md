@@ -1,3 +1,8 @@
+### To utilize GPU
+```sh
+docker run --rm --gpus all nvidia/cuda:12.3.1-base-ubuntu20.04 nvidia-smi
+```
+
 ### Setup Docker Network
 
 ```sh
