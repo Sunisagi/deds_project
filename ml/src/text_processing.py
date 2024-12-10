@@ -315,6 +315,9 @@ def initialize():
     author_df = pd.DataFrame.from_dict(authors_name, orient='index').reset_index().rename(columns={'index': 'auid'})
     affiliations_df = pd.DataFrame.from_dict(affiliations, orient='index').reset_index().rename(columns={'index': 'affid'})
 
+    unique_locations = pd.read_json(f"{raw_path}/latlong.json", orient="records", lines=True)
+    affiliations_df = affiliations_df.merge(unique_locations, on=["country", "city"], how="left")
+
     # Save the files with the date added to filenames
     path = f"{save_dir}/paper_{date_str}"
     write_json_hadoop(papers_df.to_json(orient="records", lines=True),path)

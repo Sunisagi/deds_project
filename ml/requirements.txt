@@ -21,3 +21,7 @@ transformers[torch]==4.46.3
 typing_extensions==4.12.2
 urllib3==2.2.3
 nltk==3.9.1
+pydeck==0.9.1
+pyvis==0.3.2
+geopy==2.4.1
+networkx==3.2.1

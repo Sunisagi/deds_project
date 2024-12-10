@@ -5,7 +5,7 @@ import numpy as np
 import os
 nltk.download("stopwords")
 from nltk.corpus import stopwords
-from recommendation import make_model,write_numpy_hadoop,save_model
+from recommendation import make_model,write_numpy_hadoop,save_model,write_json_hadoop
 from text_processing import initialize
 from text_clean import initialize_clean,clean_scarpe
 from connection_setup import set_classpath

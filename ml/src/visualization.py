@@ -13,6 +13,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 from recommendation import TextRecommender,load_latest_file,load_latest_pkl
 import torch
 import ast
+import networkx as nx
+import pydeck as pdk
+from pyvis.network import Network
 # Main content
 st.title('Project')
 
@@ -28,7 +31,9 @@ def load_file(prefix):
     df = load_latest_file(prefix,data_dir)
     df = df.fillna('N/A')
     return df
-
+# @st.cache_data
+# def load_network():
+#     return pd.DataFrame(model.find_similar_papers_all(N=50)).reset_index()
 
 # Session state initialization for mode and paper_id
 if 'mode' not in st.session_state:
@@ -41,6 +46,8 @@ model = load_model_recomendation()
 papers_df = load_file("paper")
 authors_df = load_file("author")
 affiliations_df = load_file("affiliation")
+# papers_network_df = load_network()
+
 
 papers_df['id'] = papers_df['id'].astype(str)
 affiliations_df['affid'] = affiliations_df['affid'].astype(str)
@@ -129,6 +136,111 @@ elif st.session_state.mode == "Paper Information":
             with st.expander("### Similar to this paper:"):
                 create_table(model.find_similar_papers(paper_id,10)[1],False)
             st.markdown("<div style='margin-bottom: 50px;'></div>", unsafe_allow_html=True)
+
+            with st.expander("### Paper Network"):
+                #=============================================================================
+
+                # Function to build graph starting from a node
+                def build_graph_from_node(start_node_id, connection_range=10, max_depth=2):
+                    G = nx.Graph()
+                    visited = set()  # To track visited nodes
+                    node_depth = {}  # To store the depth of each node
+                    # Start with the given node
+                    to_visit = [(start_node_id, 0)]  # (node_id, depth)
+                    visited.add(start_node_id)
+                    node_depth[start_node_id] = 0  # Set the depth of the start node
+                    
+                    while to_visit:
+                        current_node, current_depth = to_visit.pop(0)
+                        
+                        if current_depth < max_depth:
+                            # Get the similar papers for the current node using the model's find_similar_papers method
+                            similar_papers_df = model.find_similar_papers(current_node, connection_range*(current_depth+1))[1]  # Get the DataFrame
+                            # Sort by score (high to low) and limit to the top N (connection_range)
+                            similar_papers_df = similar_papers_df.sort_values(by="similarity_score", ascending=False)
+                            
+                            # Use connection_range to limit the number of similar papers considered
+                            similar_papers = similar_papers_df['id'].tolist()[:connection_range*(current_depth+1)]
+                            
+                            for similar_paper in similar_papers:
+                                if similar_paper != current_node and similar_paper not in visited:
+                                    visited.add(similar_paper)
+                                    G.add_edge(current_node, similar_paper)
+                                    node_depth[similar_paper] = current_depth + 1  # Set the depth of the similar paper
+                                    to_visit.append((similar_paper, current_depth + 1))  # Add to the visit queue for the next level
+
+                    return G, node_depth
+
+                # Function to assign colors based on depth
+                def assign_colors_by_depth(node_depth):
+                    colors = {
+                        0: 'red',      # Parent node (level 0)
+                        1: 'green',    # Child node (level 1)
+                        2: 'blue',     # Grandchild node (level 2)
+                        3: 'orange', 
+                    }
+                    node_colors = [colors[node_depth[node]] if node_depth[node] in colors else 'gray' for node in node_depth]
+                    return node_colors
+                # Build the graph from the starting node (max_depth = 2, you can increase this if needed)
+                max_depth = 3  # Define max depth for traversal
+                connection_range = st.slider("Select the number of similar papers (Connections)", min_value=5, max_value=25, value=10, step=1)
+                G, node_depth = build_graph_from_node(paper_id, connection_range=connection_range, max_depth=max_depth)
+                # Create Pyvis Network object
+                net = Network(height='800px', width='100%', notebook=True)
+
+                for node in G.nodes:
+                    # Assign color based on depth
+                    color = assign_colors_by_depth(node_depth)[list(node_depth.keys()).index(node)]
+                    net.add_node(node, color=color, title=str(node))  # Use color based on depth
+
+                for edge in G.edges:
+                    net.add_edge(edge[0], edge[1], color="rgba(0,0,0,0)", width=0)
+
+                # Set options for the visualization (this allows better customization of how the graph is displayed)
+                net.set_options("""
+                var options = {
+                "physics": {
+                    "enabled": true,
+                    "barnesHut": {
+                    "gravitationalConstant": -8000,
+                    "centralGravity": 0.1,
+                    "springLength": 95,
+                    "springConstant": 0.04,
+                    "damping": 0.09
+                    }
+                },
+                "nodes": {
+                    "size": 20,
+                    "font": {
+                    "size": 25,
+                    "face": "arial",
+                    "weight": "bold"
+                    }
+                },
+                "edges": {
+                    "width": 4,
+                    "color": {
+                    "highlight": "#FF0000"
+                    },
+                    "smooth": {
+                    "type": "continuous"
+                    }
+                }
+                }
+                """)
+
+
+                # Display the network in Streamlit
+                st.write("Network Graph:")
+                net.show("graph.html")
+
+
+                import streamlit.components.v1 as st_components
+                st_components.html(open("graph.html", "r").read(), height=800)
+
+                #=============================================================================
+
+
         else:
             st.write("No paper found with that ID.")
 elif st.session_state.mode == "Author Information":
@@ -293,3 +405,35 @@ else:
         title=f"Top {top_k} Publisher by Number of Papers",
     )
     st.plotly_chart(publisher_bar_all, use_container_width=True)
+
+    
+
+#=============================================================================
+    affiliations_df_ll = affiliations_df[(affiliations_df['Latitude'] != 'N/A') & (affiliations_df['Longitude'] != 'N/A')]
+    st.subheader("3. Analysis of Paper Density by Geographical Location")
+    heatmap_layer = pdk.Layer(
+        'HeatmapLayer',
+        data=affiliations_df_ll,
+        get_position=['Longitude', 'Latitude'],
+        get_weight='paper_count',
+        opacity=0.7,
+        radius_pixels=50,
+        threshold=0.1
+    )
+
+    # Define the deck.gl view (for zoom and center positioning)
+    view = pdk.ViewState(
+        latitude=affiliations_df_ll['Latitude'].mean(),
+        longitude=affiliations_df_ll['Longitude'].mean(),
+        zoom=1,
+        pitch=0
+    )
+
+    # Create the Pydeck deck object
+    deck = pdk.Deck(
+        layers=[heatmap_layer],
+        initial_view_state=view,
+        map_style='mapbox://styles/mapbox/dark-v10',  # You can change the map style if needed
+        tooltip={"text": "{name} \n{Country}\n{City}"}
+    )
+    st.pydeck_chart(deck)
